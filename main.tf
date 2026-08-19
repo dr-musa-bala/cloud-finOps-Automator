@@ -1,0 +1,40 @@
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "floci"
+  secret_key                  = "floci"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+  
+  # Force path-style addressing for S3 in local emulation
+  s3_use_path_style           = true
+
+  endpoints {
+    dynamodb = "http://localhost:4566"
+    s3       = "http://localhost:4566"
+    iam      = "http://localhost:4566"
+    sqs      = "http://localhost:4566"
+  }
+}
+
+# DynamoDB Table
+resource "aws_dynamodb_table" "idle_resources" {
+  name         = "idle-resources-tracker"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "ResourceId"
+
+  attribute {
+    name = "ResourceId"
+    type = "S"
+  }
+
+  tags = {
+    Environment = "Local-Floci"
+    Project     = "Cloud-FinOps-Automator"
+  }
+}
+
+# S3 Bucket for archiving cost audit logs
+resource "aws_s3_bucket" "audit_logs" {
+  bucket = "finops-audit-logs-local"
+}

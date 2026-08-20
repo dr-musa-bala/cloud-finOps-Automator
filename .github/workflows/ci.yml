@@ -34,19 +34,19 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-   # 5. Spin up Local AWS Emulator Service (LocalStack)
-    - name: Start Local AWS Emulator Container
+   # 5. Spin up Floci Emulator Service
+    - name: Start Floci Container
       run: |
-        docker run -d -p 4566:4566 --name floci-emulator localstack/localstack:latest
-        
-    # Wait until LocalStack health check endpoint returns HTTP 200
-    - name: Wait for LocalStack Readiness
+        docker run -d -p 4566:4566 --name floci-emulator floci/floci:latest
+
+    # Wait until Floci health check endpoint returns HTTP 200
+    - name: Wait for Floci Readiness
       run: |
-        until curl -s http://127.0.0.1:4566/_localstack/health | grep '"dynamodb": "running"\|"available"'; do
-          echo "Waiting for LocalStack services to be ready..."
-          sleep 3
+        until curl -s http://127.0.0.1:4566/health | grep -q "ok\|running\|200"; do
+          echo "Waiting for Floci service to be ready..."
+          sleep 2
         done
-        echo "LocalStack is fully ready!"
+        echo "Floci is fully ready!"
 
     # 6. Run Terraform to Provision Infrastructure
     - name: Provision Floci Infrastructure via Terraform

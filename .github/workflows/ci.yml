@@ -21,11 +21,12 @@ jobs:
       with:
         python-version: '3.11'
 
-    # 3. Set up Terraform CLI
+    # 3. Set up Terraform CLI with wrapper disabled
     - name: Setup HashiCorp Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: "1.6.0"
+        terraform_version: "1.7.0"
+        terraform_wrapper: false
 
     # 4. Install Python dependencies
     - name: Install Python Dependencies

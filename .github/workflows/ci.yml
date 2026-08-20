@@ -33,11 +33,12 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    # 5. Spin up Floci container service
-    - name: Start Floci Container
+    # 5. Spin up Local AWS Emulator Service (LocalStack)
+    - name: Start Local AWS Emulator Container
       run: |
-        docker run -d -p 4566:4566 --name floci-emulator ghcr.io/floci-dev/floci:latest
-        sleep 5
+        docker run -d -p 4566:4566 --name floci-emulator localstack/localstack:latest
+        # Wait for the service endpoint to initialize
+        sleep 10
 
     # 6. Apply Terraform infrastructure
     - name: Provision Floci Infrastructure via Terraform

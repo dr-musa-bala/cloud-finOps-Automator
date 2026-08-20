@@ -1,0 +1,68 @@
+name: FinOps Automator CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-finops-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout repository code
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 2. Set up Python 3.11 environment
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # 3. Set up Terraform CLI
+    - name: Setup HashiCorp Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.6.0"
+
+    # 4. Install Python dependencies
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    # 5. Spin up Floci container service
+    - name: Start Floci Container
+      run: |
+        docker run -d -p 4566:4566 --name floci-emulator ghcr.io/floci-dev/floci:latest
+        sleep 5
+
+    # 6. Apply Terraform infrastructure
+    - name: Provision Floci Infrastructure via Terraform
+      run: |
+        terraform init
+        terraform apply -auto-approve
+      env:
+        AWS_ACCESS_KEY_ID: "floci"
+        AWS_SECRET_ACCESS_KEY: "floci"
+        AWS_DEFAULT_REGION: "us-east-1"
+
+    # 7. Run Reaper tests
+    - name: Test Reaper Microservice
+      run: python3 reaper.py
+      env:
+        FLOCI_ENDPOINT: "http://localhost:4566"
+        AWS_ACCESS_KEY_ID: "floci"
+        AWS_SECRET_ACCESS_KEY: "floci"
+        AWS_DEFAULT_REGION: "us-east-1"
+
+    # 8. Run Cleaner tests
+    - name: Test Cleaner Microservice
+      run: python3 cleaner.py
+      env:
+        FLOCI_ENDPOINT: "http://localhost:4566"
+        AWS_ACCESS_KEY_ID: "floci"
+        AWS_SECRET_ACCESS_KEY: "floci"
+        AWS_DEFAULT_REGION: "us-east-1"

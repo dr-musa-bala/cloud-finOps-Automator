@@ -1,9 +1,10 @@
+import os
 import time
 import boto3
 import requests
 
 # Pointing boto3 to Floci AWS Emulator on port 4566
-FLOCI_ENDPOINT = "http://localhost:4566"
+FLOCI_ENDPOINT = os.getenv("FLOCI_ENDPOINT", "http://localhost:4566")
 REGION = "us-east-1"
 
 # Initialize DynamoDB Resource Client

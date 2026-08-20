@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-cleaner-job
+  labels:
+    app: finops-automator
+spec:
+  # Schedule: Runs every day at 1:00 AM (UTC)
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          hostNetwork: true
+          containers:
+          - name: cleaner
+            image: finops-cleaner:v1.0
+            imagePullPolicy: Never
+            env:
+            - name: FLOCI_ENDPOINT
+              value: "http://192.168.49.1:4566"
+            - name: AWS_ACCESS_KEY_ID
+              value: "floci"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "floci"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+          restartPolicy: OnFailure

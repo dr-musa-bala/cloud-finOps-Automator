@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-reaper-job
+  labels:
+    app: finops-automator
+spec:
+  # Schedule: Runs every day at midnight (UTC)
+  schedule: "0 0 * * *"
+  # If a previous job is still running, don't start a new one concurrently
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          # Uses host networking so the container can reach Floci on localhost:4566
+          hostNetwork: true
+          containers:
+          - name: reaper
+            image: finops-reaper:v1.0
+            # Never automatically pull from a remote registry since image is local
+            imagePullPolicy: Never
+            env:
+            - name: FLOCI_ENDPOINT
+              value: "http://192.168.49.1:4566"
+            - name: AWS_SECRET_KEY_ID
+              value: "floci"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "floci"
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+          # OnFailure ensures Kubernetes re-tries if the script crashes unexpectedly
+          restartPolicy: OnFailure

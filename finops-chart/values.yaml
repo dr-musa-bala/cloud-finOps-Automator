@@ -1,0 +1,19 @@
+# Global environment settings
+global:
+  flociEndpoint: "http://192.168.49.1:4566"
+  region: "us-east-1"
+  awsAccessKeyId: "mock_key"
+  awsSecretAccessKey: "mock_secret"
+  pushgatewayUrl: "pushgateway-prometheus-pushgateway.default.svc:9091"
+
+# Reaper CronJob Settings
+reaper:
+  image: "finops-reaper:v2"
+  imagePullPolicy: "Never"
+  schedule: "0 * * * *"  # Runs every hour
+
+# Cleaner CronJob Settings
+cleaner:
+  image: "finops-cleaner:v2"
+  imagePullPolicy: "Never"
+  schedule: "30 * * * *" # Runs every hour at :30

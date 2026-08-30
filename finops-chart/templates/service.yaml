@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-reaper-metrics
+  labels:
+    app: finops-reaper
+    release: kube-prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: finops-reaper
+  ports:
+    - name: reaper-metrics
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-cleaner-metrics
+  labels:
+    app: finops-cleaner
+    release: kube-prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: finops-cleaner
+  ports:
+    - name: cleaner-metrics
+      port: 8001
+      targetPort: 8001

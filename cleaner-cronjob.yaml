@@ -15,9 +15,11 @@ spec:
           hostNetwork: true
           containers:
           - name: cleaner
-            image: finops-cleaner:v1.0
+            image: finops-cleaner:v2              # Updated image tag matching your build
             imagePullPolicy: Never
             env:
+            - name: PUSHGATEWAY_URL               # Added Pushgateway endpoint
+              value: "pushgateway-prometheus-pushgateway.default.svc:9091"
             - name: FLOCI_ENDPOINT
               value: "http://192.168.49.1:4566"
             - name: AWS_ACCESS_KEY_ID

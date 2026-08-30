@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-reaper
+  labels:
+    app: finops-automator
+    release: kube-prometheus
+spec:
+  schedule: "{{ .Values.reaper.schedule }}"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: finops-reaper
+            release: kube-prometheus
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: reaper
+              image: {{ .Values.reaper.image }}
+              imagePullPolicy: Never
+              ports:
+                - name: reaper-metrics
+                  containerPort: 8000
+                  protocol: TCP
+              readinessProbe:
+                httpGet:
+                  path: /metrics
+                  port: 8000
+                initialDelaySeconds: 1
+                periodSeconds: 2
+              env:
+                - name: FLOCI_ENDPOINT
+                  value: "{{ .Values.global.flociEndpoint }}"
+                - name: AWS_DEFAULT_REGION
+                  value: "{{ .Values.global.region }}"
+                - name: AWS_ACCESS_KEY_ID
+                  value: "{{ .Values.global.awsAccessKeyId }}"
+                - name: AWS_SECRET_ACCESS_KEY
+                  value: "{{ .Values.global.awsSecretAccessKey }}"

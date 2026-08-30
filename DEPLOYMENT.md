@@ -347,3 +347,104 @@ jobs:
 * **CI Readiness Loops:** Static `sleep` commands cause race conditions when starting emulators in CI. Replacing static delays with active polling (`until curl ...`) guarantees services are accepting connections before downstream jobs execute.
 
 ---
+
+## Technical Documentation: Resolving Prometheus Pushgateway Metric Duplication & Discovery Issues
+
+### **Executive Summary**
+
+During the implementation of the `cloud-finOps-Automator` Kubernetes observability pipeline, custom ephemeral Python CronJobs (`reaper` and `cleaner`) pushed operational FinOps counters (`finops_resources_scanned_total`, `flagged_total`, `purged_total`, `s3_audit_logs_written_total`) to a centralized Prometheus Pushgateway.
+
+While metrics were successfully ingested into the Prometheus Time Series Database (TSDB), two distinct structural issues arose:
+
+1. **Metric Duplicate Series Ingestion:** Prometheus TSDB queried and returned two identical metric series for every target execution (e.g., duplicate `finops_resources_scanned_total` outputs).
+2. **Pushgateway Target Resolution Failure:** Scrape target definitions failed due to mismatched label selectors across Kubernetes `Service` and `ServiceMonitor` resources.
+
+---
+
+### **Root Cause Analysis**
+
+#### 1. Redundant Service Declarations for Ephemeral Workloads
+
+The initial Kubernetes configuration declared explicit `ClusterIP` Services (`finops-reaper-metrics` and `finops-cleaner-metrics`) targeting ports `8000` and `8001`. Because `reaper` and `cleaner` run as short-lived `CronJobs` rather than long-running HTTP servers listening on persistent ports, exposing dedicated Kubernetes `Service` endpoints for them was invalid. The metrics were already being pushed directly to Pushgateway.
+
+#### 2. Dual Scrape Loops (Pushgateway Service vs. Pod Discovery)
+
+When inspectable via the Prometheus API endpoint `/api/v1/targets`, Prometheus was discovering and scraping Pushgateway via two overlapping definitions simultaneously:
+
+* **Static Scrape Job (`job: "pushgateway"`):** Defined via Helm default values scraping `pushgateway-prometheus-pushgateway.default.svc:9091`.
+* **Dynamic Operator Scrape Job (`job: "pushgateway-prometheus-pushgateway"`):** Defined via a custom `ServiceMonitor` scraping the backing Pod IP (`10.244.7.23:9091`).
+
+Both targets ingested metrics from the exact same Pushgateway instance, duplicating every series in TSDB.
+
+#### 3. Kubernetes Label Selector Mismatch
+
+The custom `ServiceMonitor` applied `matchLabels: app: pushgateway`. However, Helm's standard deployment manifest tagged the underlying deployment and pods with `app.kubernetes.io/name: prometheus-pushgateway`. Consequently, selector matching failed and `kubectl exec` targeting services resulted in resolution timeouts.
+
+---
+
+### **Step-by-Step Resolution Path**
+
+#### **Step 1: Terminate Ephemeral Workload Services**
+
+Deleted non-functional Service manifests targeting ephemeral CronJobs.
+
+```bash
+kubectl delete svc -l release=kube-prometheus -l 'app in (finops-reaper, finops-cleaner)' --ignore-not-found
+
+```
+
+#### **Step 2: Consolidate Scraping Topology**
+
+Deleted the redundant custom `ServiceMonitor` to allow Prometheus to rely exclusively on the default static service target (`pushgateway-prometheus-pushgateway.default.svc:9091`).
+
+```bash
+kubectl delete servicemonitor pushgateway-servicemonitor -n default
+
+```
+
+#### **Step 3: Flush Prometheus TSDB Active Scrape Memory**
+
+Restarted the Prometheus StatefulSet pod to reset internal scrape targets and clear stale endpoints.
+
+```bash
+kubectl delete pod prometheus-kube-prometheus-kube-prome-prometheus-0 -n default
+
+```
+
+#### **Step 4: Execute Verification Cycle & Validate Single-Series TSDB Output**
+
+Triggered manual test jobs for the FinOps automation scripts:
+
+```bash
+kubectl delete job test-reaper-check test-cleaner-check --ignore-not-found
+kubectl create job --from=cronjob/finops-release-reaper test-reaper-check
+kubectl create job --from=cronjob/finops-release-cleaner test-cleaner-check
+
+```
+
+Queried Prometheus TSDB via port-forwarding to confirm single-series ingestion:
+
+```bash
+curl -s 'http://localhost:9090/api/v1/query?query=finops_resources_scanned_total' | jq '.data.result[] | {metric: .metric.__name__, job: .metric.job, instance: .metric.instance, value: .value[1]}'
+
+```
+
+**Validated Output (Single Deduplicated Series):**
+
+```json
+{
+  "metric": "finops_resources_scanned_total",
+  "job": "finops-reaper",
+  "instance": null,
+  "value": "2"
+}
+
+```
+
+---
+
+## GitHub Deployment Guide
+
+Follow these steps to stage, commit, and push your resolution changes to your remote repository.
+
+### **1. Inspect Repository Status**

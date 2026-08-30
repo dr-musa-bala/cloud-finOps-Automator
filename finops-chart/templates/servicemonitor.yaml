@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-servicemonitor
+  labels:
+    release: kube-prometheus
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - finops-reaper
+          - finops-cleaner
+  namespaceSelector:
+    any: true
+  endpoints:
+    - port: reaper-metrics
+      path: /metrics
+      interval: 10s
+    - port: cleaner-metrics
+      path: /metrics
+      interval: 10s

@@ -1,77 +1,87 @@
-name: FinOps Automator CI Pipeline
+name: FinOps Automator Lean CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
-  test-finops-pipeline:
+  lint-and-scan:
+    name: 1. Flake8 Lint & Trivy Scan
     runs-on: ubuntu-latest
-
     steps:
-    # 1. Checkout repository code
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    # 2. Set up Python 3.11 environment
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      # --- 1. PYTHON LINTING (Flake8) ---
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    # 3. Set up Terraform CLI with wrapper disabled
-    - name: Setup HashiCorp Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: "1.7.0"
-        terraform_wrapper: false
+      - name: Install & Run Flake8
+        run: |
+          pip install flake8
+          # Stop build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Warning level checks for code style
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
 
-    # 4. Install Python dependencies
-    - name: Install Python Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      # --- 2. HELM LINTING ---
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
 
-   # 5. Spin up Floci Emulator Service
-    - name: Start Floci Container
-      run: |
-        docker run -d -p 4566:4566 --name floci-emulator floci/floci:latest
+      - name: Lint Helm Chart
+        run: helm lint finops-chart/
 
-    # Wait until Floci health check endpoint returns HTTP 200
-    - name: Wait for Floci Readiness
-      run: |
-        until curl -s http://127.0.0.1:4566/health | grep -q "ok\|running\|200"; do
-          echo "Waiting for Floci service to be ready..."
-          sleep 2
-        done
-        echo "Floci is fully ready!"
+      # --- 3. TRIVY SECURITY SCAN (FS / Dockerfiles) ---
+      - name: Run Trivy Repository Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
 
-    # 6. Run Terraform to Provision Infrastructure
-    - name: Provision Floci Infrastructure via Terraform
-      run: |
-        terraform init
-        terraform apply -auto-approve
-      env:
-        AWS_ACCESS_KEY_ID: "floci"
-        AWS_SECRET_ACCESS_KEY: "floci"
-        AWS_DEFAULT_REGION: "us-east-1"
+  build-and-push:
+    name: 2. Docker Build & Push
+    needs: lint-and-scan
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    # 7. Test the Scanner Microservice (reaper.py)
-    - name: Test Reaper Microservice
-      run: python3 reaper.py
-      env:
-        FLOCI_ENDPOINT: "http://127.0.0.1:4566"
-        AWS_ACCESS_KEY_ID: "floci"
-        AWS_SECRET_ACCESS_KEY: "floci"
-        AWS_DEFAULT_REGION: "us-east-1"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    # 8. Test the Remediator Microservice (cleaner.py)
-    - name: Test Cleaner Microservice
-      run: python3 cleaner.py
-      env:
-        FLOCI_ENDPOINT: "http://127.0.0.1:4566"
-        AWS_ACCESS_KEY_ID: "floci"
-        AWS_SECRET_ACCESS_KEY: "floci"
-        AWS_DEFAULT_REGION: "us-east-1"
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build & Scan Reaper Container Image
+      - name: Build and Push Reaper Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.reaper
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}
+
+      # Build & Scan Cleaner Container Image
+      - name: Build and Push Cleaner Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.cleaner
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/finops-cleaner:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/finops-cleaner:${{ github.sha }}

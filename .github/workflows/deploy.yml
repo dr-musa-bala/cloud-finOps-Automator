@@ -1,4 +1,4 @@
-name: FinOps Automator CI/CD Pipeline
+name: Cloud-FinOps-Automator Enterprise CI/CD
 
 on:
   push:
@@ -7,25 +7,48 @@ on:
     branches: [ main ]
 
 jobs:
-  lint-and-validate:
+  # -------------------------------------------------------------
+  # STAGE 1: Code Quality, Linting & SonarQube Analysis
+  # -------------------------------------------------------------
+  quality-and-security:
+    name: 1. Code Quality & Security Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for SonarQube blame analysis
 
-      - name: Set up Helm
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python Flake8 & Syntax Linting
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: SonarQube / SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Helm Chart Linting
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
+      - run: helm lint finops-chart/
 
-      - name: Lint Helm Chart
-        run: |
-          helm lint finops-chart/
-
-  build-and-push:
-    needs: lint-and-validate
+  # -------------------------------------------------------------
+  # STAGE 2: Build, Trivy Security Vulnerability Scan & Push
+  # -------------------------------------------------------------
+  build-and-vulnerability-scan:
+    name: 2. Security Scan & Docker Build
+    needs: quality-and-security
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -39,18 +62,44 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push Reaper Image
+      # Build Reaper Image
+      - name: Build Reaper Image (Local)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.reaper
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:latest,${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}
+          load: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}
 
-      - name: Build and Push Cleaner Image
-        uses: docker/build-push-action@v5
+      # Trivy Security Scan on Reaper Image
+      - name: Run Trivy Security Scan on Reaper Image
+        uses: aquasecurity/trivy-action@master
         with:
-          context: .
-          file: Dockerfile.cleaner
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/finops-cleaner:latest,${{ secrets.DOCKERHUB_USERNAME }}/finops-cleaner:${{ github.sha }}
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1' # Fails build if HIGH or CRITICAL vulnerabilities exist
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      # Push Reaper Image after passing Security Scan
+      - name: Push Reaper Image
+        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}
+
+  # -------------------------------------------------------------
+  # STAGE 3: GitOps Trigger for ArgoCD Deployment
+  # -------------------------------------------------------------
+  gitops-cd-trigger:
+    name: 3. GitOps Continuous Delivery (ArgoCD)
+    needs: build-and-vulnerability-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Manifest Repository
+        uses: actions/checkout@v4
+
+      - name: Update Helm Chart Values with New Image Tag
+        run: |
+          sed -i 's/tag: .*/tag: "${{ github.sha }}"/g' finops-chart/values.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(gitops): update image tag to ${{ github.sha }} [skip ci]"
+          git push

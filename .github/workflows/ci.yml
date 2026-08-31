@@ -14,7 +14,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # --- 1. PYTHON LINTING (Flake8) ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -23,12 +22,8 @@ jobs:
       - name: Install & Run Flake8
         run: |
           pip install flake8
-          # Stop build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Warning level checks for code style
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+          flake8 . --count --statistics
 
-      # --- 2. HELM LINTING ---
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
@@ -37,7 +32,6 @@ jobs:
       - name: Lint Helm Chart
         run: helm lint finops-chart/
 
-      # --- 3. TRIVY SECURITY SCAN (FS / Dockerfiles) ---
       - name: Run Trivy Repository Vulnerability Scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -64,7 +58,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build & Scan Reaper Container Image
       - name: Build and Push Reaper Image
         uses: docker/build-push-action@v5
         with:
@@ -75,7 +68,6 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/finops-reaper:${{ github.sha }}
 
-      # Build & Scan Cleaner Container Image
       - name: Build and Push Cleaner Image
         uses: docker/build-push-action@v5
         with:

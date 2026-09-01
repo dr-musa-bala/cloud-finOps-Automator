@@ -10,7 +10,7 @@ global:
 reaper:
   image: "finops-reaper:v2"
   imagePullPolicy: "Never"
-  schedule: "0 * * * *"  # Runs every hour
+  schedule: "0 */2 * * *"  # Runs every hour
 
 # Cleaner CronJob Settings
 cleaner:

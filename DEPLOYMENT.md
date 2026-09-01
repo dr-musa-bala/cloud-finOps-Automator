@@ -448,3 +448,143 @@ curl -s 'http://localhost:9090/api/v1/query?query=finops_resources_scanned_total
 Follow these steps to stage, commit, and push your resolution changes to your remote repository.
 
 ### **1. Inspect Repository Status**
+
+
+---
+
+## 2. End-to-End System Architecture
+
+The pipeline consists of two primary loops: the **Continuous Integration (CI)** loop handled by GitHub Actions and the **Continuous Delivery (CD)** loop executed in-cluster by ArgoCD.
+
+
+```
+
++-----------------------------------------------------------------------------------+
+|                                 DEVELOPER WORKFLOW                                |
++-----------------------------------------------------------------------------------+
+|
+| 1. Git Push (values.yaml / code)
+v
++-----------------------------------------------------------------------------------+
+|                              GITHUB ACTIONS (CI LOOP)                             |
+|  - Static Code Analysis (Flake8)                                                  |
+|  - Container Security Scanning (Trivy)                                             |
+|  - Multi-Arch Docker Image Build & Push to Docker Hub                             |
++-----------------------------------------------------------------------------------+
+|
+| 2. Image Pushed (finops-reaper / cleaner)
+v
++-----------------------------------------------------------------------------------+
+|                              ARGOCD CONTROLLER (CD LOOP)                          |
+|  - Monitors Git Repo (finops-chart) every 3 minutes                               |
+|  - Compares desired state (Git) vs live state (Minikube)                          |
+|  - Auto-Sync, Self-Heal, & Prune enabled                                          |
++-----------------------------------------------------------------------------------+
+|
+| 3. Declarative Reconciliation
+v
++-----------------------------------------------------------------------------------+
+|                              MINIKUBE CLUSTER STATE                               |
+|  - Namespace: default                                                             |
+|  - Objects: CronJobs (Reaper / Cleaner), ConfigMaps, Secrets                      |
++-----------------------------------------------------------------------------------+
+
+```
+
+---
+
+## 3. Comprehensive Incident & Troubleshooting Log
+
+During initial deployment and password resetting attempts, several operational hurdles were encountered. The following subsections record each failure mode, technical root causes, and exact mitigation steps.
+
+### 3.1 Issue 1: ArgoCD Installation Request Limits Exceeded
+* **Symptom:** standard `kubectl apply -f install.yaml` failed or truncated due to metadata annotation size limits on large Custom Resource Definitions (CRDs).
+* **Root Cause:** Standard declarative `kubectl apply` stores the full prior manifest in the `kubectl.kubernetes.io/last-applied-configuration` annotation. ArgoCD's CRD bundle exceeded the 264 KB limit imposed on Kubernetes metadata annotations.
+* **Resolution:** Used **Server-Side Apply**, delegating diff calculations and metadata tracking directly to the API server:
+  ```bash
+  kubectl apply --server-side --force-conflicts -n argocd -f [https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml](https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml)
+
+```
+
+---
+
+### 3.2 Issue 2: Admin Authentication Failures & Password Hash Corruption
+
+* **Symptom:** UI access at `https://localhost:8443` continuously returned `invalid user name or password` even after attempting manual password patches.
+* **Root Cause:** ArgoCD requires bcrypt-hashed passwords in `argocd-secret` along with synchronized timestamp metadata (`admin.passwordMtime`). Injecting raw plain-text strings or malformed bcrypt payloads corrupted the credential engine.
+* **Resolution:** Attempted bcrypt patching via Python, but lingering secret mismatch forced a clean reset strategy (see 3.3).
+
+---
+
+### 3.3 Issue 3: `Terminating` Namespace Locks & Complete Fresh Restart
+
+* **Symptom:** To resolve corrupted state, `kubectl delete namespace argocd` was executed. The namespace hung indefinitely in the `Terminating` state. Subsequent re-installation attempts failed with:
+```text
+Error from server (Forbidden): ... unable to create new content in namespace argocd because it is being terminated
+
+```
+
+
+* **Root Cause:** Active Kubernetes finalizers remained registered on namespace sub-resources, preventing the API server from destroying the namespace object.
+* **Resolution:** Executed a complete hard purge by clearing the finalizers, enabling a clean fresh-start re-installation:
+1. **Force-cleared finalizers from the frozen namespace:**
+```bash
+kubectl patch namespace argocd -p '{"metadata":{"finalizers":null}}' --type=merge
+
+```
+
+
+2. **Re-created a clean `argocd` namespace:**
+```bash
+kubectl create namespace argocd
+
+```
+
+
+3. **Re-installed ArgoCD manifests via Server-Side Apply:**
+```bash
+kubectl apply --server-side --force-conflicts -n argocd -f [https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml](https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml)
+kubectl rollout status deployment/argocd-server -n argocd
+
+```
+
+
+4. **Extracted auto-generated initial admin password:**
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
+
+```
+
+
+5. **Re-applied the FinOps GitOps Application CRD:**
+```bash
+kubectl apply -f argocd-application.yaml -n argocd
+
+```
+---
+
+### 3.4 Issue 4: Legacy Manual Helm Releases Coexisting with GitOps State
+
+* **Symptom:** `kubectl get cronjobs` displayed duplicate resources (`cloud-finops-automator-*` vs. `finops-release-*`).
+* **Root Cause:** Artifacts from prior manual `helm install` commands remained active in the `default` namespace alongside the new ArgoCD release.
+* **Resolution:** Purged the legacy unmanaged CronJobs to ensure cluster state is 100% driven by GitOps:
+```bash
+kubectl delete cronjob finops-release-cleaner finops-release-reaper -n default
+
+```
+
+
+
+---
+
+## 4. End-to-End GitOps Verification Record
+
+To validate the complete GitOps workflow, a configuration change was made directly to the Helm values file in source control.
+
+### 4.1 Test Execution
+
+1. **Source Edit:** Updated `reaper.schedule` inside `finops-chart/values.yaml` from `0 * * * *` (hourly) to `0 */2 * * *` (every 2 hours):
+```bash
+sed -i 's/schedule: "0 \* \* \* \*"/schedule: "0 \*\/2 \* \* \*"/g' finops-chart/values.yaml
+
+```

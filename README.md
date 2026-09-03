@@ -250,3 +250,7 @@ aws --endpoint-url=http://localhost:4566 s3 ls s3://finops-audit-logs-local/audi
 | **IaC** | Terraform (AWS Provider) | ✅ Deployed | Manages state schema with path-style S3 routing |
 | **Detection Engine** | Python (`boto3`) + `venv` | ✅ Operational | Identifies $11.70/day in waste & writes state TTLs |
 | **Remediation & Audit** | Python + S3 JSON Logger | ✅ Operational | Auto-purges expired resources & archives compliance logs |
+
+## Documentation
+- For E2E fire drill setup & bug post-mortems, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
+# FinOps Pipeline Verified

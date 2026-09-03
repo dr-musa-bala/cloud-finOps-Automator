@@ -189,8 +189,3 @@ verify_metric() {\
 ```
 ---
 
-### Step 2: Link `TROUBLESHOOTING.md` in Your `README.md`
-
-
-```bash
-echo -e "\n## Documentation\n- For E2E fire drill setup & bug post-mortems, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)." >> README.md
